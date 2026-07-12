@@ -1,3 +1,4 @@
+using EquivalentResistorCalculator.Core.Models;
 using EquivalentResistorCalculator.Core.Stock;
 
 namespace EquivalentResistorCalculator.Tests;
@@ -130,5 +131,94 @@ public class StockRepositoryTests : IDisposable
         string secondSelection = repo.Select(firstSelection);
 
         Assert.Equal("alpha.csv", secondSelection);
+    }
+
+    [Fact]
+    public void Load_ParsesValidRows()
+    {
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllLines(Path.Combine(_tempFolder, "bench.csv"), new[]
+        {
+            "Value,Label,Package",
+            "10000,10K,ThroughHole",
+            "220,220,SMD",
+        });
+
+        var repo = new StockRepository(_tempFolder);
+        var result = repo.Load("bench.csv");
+
+        Assert.Equal("bench.csv", result.FileName);
+        Assert.Equal(0, result.SkippedRowCount);
+        Assert.Equal(2, result.Resistors.Count);
+        Assert.Equal(new Resistor(10_000, "10K", PackageType.ThroughHole), result.Resistors[0]);
+        Assert.Equal(new Resistor(220, "220", PackageType.SMD), result.Resistors[1]);
+    }
+
+    [Fact]
+    public void Load_SkipsMalformedRowsAndCountsThem()
+    {
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllLines(Path.Combine(_tempFolder, "bench.csv"), new[]
+        {
+            "Value,Label,Package",
+            "10000,10K,ThroughHole",        // valid
+            "not-a-number,Bad,ThroughHole", // unparseable value
+            "220,220,NotAPackage",          // unparseable package
+            "330,three,thirty,ThroughHole", // wrong column count (label with comma)
+            "470,470",                      // wrong column count
+        });
+
+        var repo = new StockRepository(_tempFolder);
+        var result = repo.Load("bench.csv");
+
+        Assert.Single(result.Resistors);
+        Assert.Equal(4, result.SkippedRowCount);
+    }
+
+    [Fact]
+    public void Load_EmptyLabelFallsBackToFormattedValue()
+    {
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllLines(Path.Combine(_tempFolder, "bench.csv"), new[]
+        {
+            "Value,Label,Package",
+            "10200,,ThroughHole",
+        });
+
+        var repo = new StockRepository(_tempFolder);
+        var result = repo.Load("bench.csv");
+
+        Assert.Equal("10.2K", result.Resistors[0].Label);
+    }
+
+    [Fact]
+    public void FilterByPackage_NullReturnsAllResistorsUnfiltered()
+    {
+        var resistors = new List<Resistor>
+        {
+            new(10, "10", PackageType.ThroughHole),
+            new(20, "20", PackageType.SMD),
+        };
+
+        var filtered = StockRepository.FilterByPackage(resistors, null);
+
+        Assert.Equal(resistors, filtered);
+    }
+
+    [Theory]
+    [InlineData(PackageType.ThroughHole)]
+    [InlineData(PackageType.SMD)]
+    public void FilterByPackage_FiltersToRequestedPackageOnly(PackageType filter)
+    {
+        var resistors = new List<Resistor>
+        {
+            new(10, "10", PackageType.ThroughHole),
+            new(20, "20", PackageType.SMD),
+        };
+
+        var filtered = StockRepository.FilterByPackage(resistors, filter);
+
+        Assert.All(filtered, r => Assert.Equal(filter, r.Package));
+        Assert.Single(filtered);
     }
 }

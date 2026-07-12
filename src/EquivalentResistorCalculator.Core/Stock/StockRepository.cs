@@ -1,6 +1,13 @@
 using System.Globalization;
+using EquivalentResistorCalculator.Core.Models;
+using EquivalentResistorCalculator.Core.Parsing;
 
 namespace EquivalentResistorCalculator.Core.Stock;
+
+public sealed record StockLoadResult(
+    string FileName,
+    IReadOnlyList<Resistor> Resistors,
+    int SkippedRowCount);
 
 public sealed class StockRepository
 {
@@ -74,6 +81,49 @@ public sealed class StockRepository
         SelectedFileName = selected;
         return selected;
     }
+
+    public StockLoadResult Load(string fileName)
+    {
+        string path = Path.Combine(_stocksFolder, fileName);
+        var resistors = new List<Resistor>();
+        int skipped = 0;
+
+        foreach (string line in File.ReadLines(path).Skip(1))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            string[] columns = line.Split(',');
+            if (columns.Length != 3)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (!double.TryParse(columns[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (!Enum.TryParse(columns[2], ignoreCase: false, out PackageType package)
+                || !Enum.IsDefined(package))
+            {
+                skipped++;
+                continue;
+            }
+
+            string label = string.IsNullOrEmpty(columns[1]) ? ResistanceParser.Format(value) : columns[1];
+            resistors.Add(new Resistor(value, label, package));
+        }
+
+        return new StockLoadResult(fileName, resistors, skipped);
+    }
+
+    public static IReadOnlyList<Resistor> FilterByPackage(IReadOnlyList<Resistor> resistors, PackageType? packageFilter)
+        => packageFilter is null
+            ? resistors
+            : resistors.Where(r => r.Package == packageFilter.Value).ToList();
 
     private void SeedIfEmpty()
     {
