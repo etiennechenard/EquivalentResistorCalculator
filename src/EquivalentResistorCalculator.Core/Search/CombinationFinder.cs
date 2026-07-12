@@ -22,6 +22,8 @@ public static class CombinationFinder
         var currentLevel = new List<CombinationResult>();
         foreach (var resistor in stock)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var node = CombinationNode.Leaf(resistor);
             string description = node.Description;
             var result = new CombinationResult(
@@ -43,6 +45,8 @@ public static class CombinationFinder
 
             foreach (var prev in currentLevel)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 foreach (var resistor in stock)
                 {
                     double seriesTotal = prev.TotalResistance + resistor.Value;

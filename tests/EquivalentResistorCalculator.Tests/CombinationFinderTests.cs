@@ -94,6 +94,30 @@ public class CombinationFinderTests
     }
 
     [Fact]
+    public void Cancellation_PreCancelledToken_ThrowsOperationCanceledException()
+    {
+        var stock = new List<Resistor> { new(1_000, "A", PackageType.ThroughHole) };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            CombinationFinder.Find(stock, targetOhms: 1_000, maxDepth: 1, cts.Token));
+    }
+
+    [Fact]
+    public void Cancellation_MidSearch_ThrowsOperationCanceledException()
+    {
+        var stock = Enumerable.Range(1, 1_000)
+            .Select(i => new Resistor(i, $"R{i}", PackageType.ThroughHole))
+            .ToList();
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(1));
+
+        Assert.Throws<OperationCanceledException>(() =>
+            CombinationFinder.Find(stock, targetOhms: 1_000, maxDepth: 3, cts.Token));
+    }
+
+    [Fact]
     public void BeamLimit_KeepsSearchBoundedWithLargeStock()
     {
         var stock = Enumerable.Range(1, 600)
