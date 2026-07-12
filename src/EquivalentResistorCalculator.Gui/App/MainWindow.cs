@@ -1,4 +1,5 @@
 using Hexa.NET.ImGui;
+using EquivalentResistorCalculator.Core.Search;
 using EquivalentResistorCalculator.Core.Stock;
 using EquivalentResistorCalculator.Gui.Settings;
 
@@ -8,6 +9,8 @@ internal sealed class MainWindow : IDisposable
 {
     private readonly SettingsService _settingsService;
     private readonly StockRepository _stockRepository;
+    private readonly SearchCoordinator _searchCoordinator;
+    private readonly SearchPanel _searchPanel;
 
     private IReadOnlyList<string> _stockFiles = Array.Empty<string>();
     private string _selectedFileName = string.Empty;
@@ -26,6 +29,9 @@ internal sealed class MainWindow : IDisposable
         _stockRepository = new StockRepository(stocksFolder);
 
         LoadStockFile(_settingsService.Current.StockFile);
+
+        _searchCoordinator = new SearchCoordinator();
+        _searchPanel = new SearchPanel(_settingsService, _stockRepository, _searchCoordinator);
     }
 
     public void Render()
@@ -44,6 +50,8 @@ internal sealed class MainWindow : IDisposable
         ImGui.Begin("##main", noDecor);
         ImGui.PopStyleVar(2);
 
+        _searchPanel.Render();
+        ImGui.Separator();
         RenderStockBar();
 
         ImGui.End();
@@ -51,6 +59,7 @@ internal sealed class MainWindow : IDisposable
 
     public void Dispose()
     {
+        _searchCoordinator.Dispose();
     }
 
     private void RenderStockBar()
@@ -76,6 +85,12 @@ internal sealed class MainWindow : IDisposable
 
         ImGui.SameLine();
         ImGui.TextUnformatted(_stockSummary);
+
+        if (_searchCoordinator.Snapshot.Status == SearchStatus.Searching)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted("Searching…");
+        }
     }
 
     private void LoadStockFile(string? requestedFileName)
