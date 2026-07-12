@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>EquivalentResistorCalculator</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+
+    <!-- Product / version metadata (embedded in the native exe's Win32 version resource). -->
+    <Version>1.0.0</Version>
+    <Product>Equivalent Resistor Calculator</Product>
+    <Company>Etienne Chenard</Company>
+    <Authors>Etienne Chenard</Authors>
+    <Description>Finds series/parallel resistor combinations approximating a target resistance from a user-maintained stock.</Description>
+    <Copyright>Copyright © Etienne Chenard</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hexa.NET.ImGui" Version="2.2.9" />
+    <PackageReference Include="Hexa.NET.ImGui.Backends" Version="1.0.18" />
+    <PackageReference Include="Hexa.NET.ImGui.Backends.SDL2" Version="1.0.18" />
+    <PackageReference Include="Hexa.NET.SDL2" Version="1.2.17" />
+    <PackageReference Include="Hexa.NET.OpenGL3" Version="1.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EquivalentResistorCalculator.Core\EquivalentResistorCalculator.Core.csproj" />
+  </ItemGroup>
+
+</Project>
