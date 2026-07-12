@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using Hexa.NET.ImGui;
 using EquivalentResistorCalculator.Core.Search;
 using EquivalentResistorCalculator.Core.Stock;
@@ -14,16 +15,21 @@ internal sealed class MainWindow : IDisposable
     private readonly StockRepository _stockRepository;
     private readonly SearchCoordinator _searchCoordinator;
     private readonly SearchPanel _searchPanel;
+    private readonly Action _resetWindowGeometry;
     private readonly Stopwatch _pollStopwatch = Stopwatch.StartNew();
 
     private IReadOnlyList<string> _stockFiles = Array.Empty<string>();
     private string _selectedFileName = string.Empty;
     private string _stockSummary = string.Empty;
 
+    private bool _openResetLayoutModal;
+    private bool _openResetAllModal;
+
     public bool ShouldClose { get; private set; }
 
-    public MainWindow()
+    public MainWindow(Action resetWindowGeometry)
     {
+        _resetWindowGeometry = resetWindowGeometry;
         _settingsService = new SettingsService();
 
         var stocksFolder = Path.Combine(
@@ -40,6 +46,8 @@ internal sealed class MainWindow : IDisposable
 
     public void Render()
     {
+        RenderMenuBar();
+
         var vp = ImGui.GetMainViewport();
 
         var noDecor = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
@@ -65,6 +73,78 @@ internal sealed class MainWindow : IDisposable
         RenderStockBar();
 
         ImGui.End();
+
+        if (_openResetLayoutModal) { ImGui.OpenPopup("##reset-layout"); _openResetLayoutModal = false; }
+        if (_openResetAllModal) { ImGui.OpenPopup("##reset-all"); _openResetAllModal = false; }
+        RenderResetLayoutModal();
+        RenderResetAllModal();
+    }
+
+    private void RenderMenuBar()
+    {
+        if (!ImGui.BeginMainMenuBar()) return;
+
+        if (ImGui.BeginMenu("View"))
+        {
+            if (ImGui.MenuItem("Reset layout"))
+                _openResetLayoutModal = true;
+            if (ImGui.MenuItem("Reset all"))
+                _openResetAllModal = true;
+            ImGui.EndMenu();
+        }
+
+        ImGui.EndMainMenuBar();
+    }
+
+    private void RenderResetLayoutModal()
+    {
+        var vp = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(vp.Pos + vp.Size * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        bool open = true;
+        if (!ImGui.BeginPopupModal("##reset-layout", ref open, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            return;
+
+        ImGui.TextWrapped("Reset layout to defaults?");
+        ImGui.Separator();
+
+        if (ImGui.Button("Yes##rl", new Vector2(80f, 0f)))
+        {
+            ImGui.LoadIniSettingsFromMemory("");
+            _resetWindowGeometry();
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel##rl", new Vector2(80f, 0f)))
+            ImGui.CloseCurrentPopup();
+
+        ImGui.EndPopup();
+    }
+
+    private void RenderResetAllModal()
+    {
+        var vp = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(vp.Pos + vp.Size * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        bool open = true;
+        if (!ImGui.BeginPopupModal("##reset-all", ref open, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            return;
+
+        ImGui.TextWrapped("Reset everything?");
+        ImGui.Separator();
+
+        if (ImGui.Button("Yes##ra", new Vector2(80f, 0f)))
+        {
+            _settingsService.ResetToDefaults();
+            LoadStockFile(null);
+            _searchPanel.ResetToSettingsDefaults();
+            ImGui.LoadIniSettingsFromMemory("");
+            _resetWindowGeometry();
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel##ra", new Vector2(80f, 0f)))
+            ImGui.CloseCurrentPopup();
+
+        ImGui.EndPopup();
     }
 
     public void Dispose()

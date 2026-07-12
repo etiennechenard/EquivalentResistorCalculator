@@ -50,6 +50,18 @@ internal sealed class SearchPanel
 
     public void ResubmitCurrentSearch() => Resubmit();
 
+    public void ResetToSettingsDefaults()
+    {
+        _depth = _settingsService.Current.MaxDepth;
+        _packageFilterIndex = _settingsService.Current.PackageFilter switch
+        {
+            PackageType.ThroughHole => 1,
+            PackageType.SMD => 2,
+            _ => 0,
+        };
+        Resubmit();
+    }
+
     public void Render()
     {
         ImGui.Text("Target:");

@@ -81,7 +81,13 @@ internal static class Program
         ImBackendSDL2.ImGuiImplSDL2.InitForOpenGL(AsBackend(window), (void*)glCtx);
         ImGuiImplOpenGL3.Init("#version 330 core");
 
-        var mainWindow = new MainWindow();
+        void ResetWindowGeometry()
+        {
+            SDL.SetWindowSize(window, 1280, 800);
+            SDL.SetWindowPosition(window, centered, centered);
+        }
+
+        var mainWindow = new MainWindow(ResetWindowGeometry);
 
         // ── Render loop ───────────────────────────────────────────────────────
         bool running = true;

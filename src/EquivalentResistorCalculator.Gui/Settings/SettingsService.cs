@@ -19,4 +19,10 @@ internal sealed class SettingsService
     }
 
     public void Save() => Current.Save(_path);
+
+    public void ResetToDefaults()
+    {
+        Current = AppSettings.Defaults;
+        Save();
+    }
 }
