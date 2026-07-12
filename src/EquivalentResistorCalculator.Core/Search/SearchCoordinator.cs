@@ -2,7 +2,7 @@ using EquivalentResistorCalculator.Core.Models;
 
 namespace EquivalentResistorCalculator.Core.Search;
 
-public sealed class SearchCoordinator
+public sealed class SearchCoordinator : IDisposable
 {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(300);
 
@@ -10,7 +10,8 @@ public sealed class SearchCoordinator
     private readonly SemaphoreSlim _searchGate = new(1, 1);
     private readonly ISearchDispatchScheduler _scheduler;
     private SearchSnapshot _snapshot = SearchSnapshot.Initial;
-    private CancellationTokenSource? _debounceCts;
+    private CancellationTokenSource? _activeCts;
+    private Task? _activeSchedule;
 
     public SearchCoordinator(ISearchDispatchScheduler? scheduler = null)
     {
@@ -24,11 +25,12 @@ public sealed class SearchCoordinator
 
     public void Submit(double targetOhms, int depth, IReadOnlyList<Resistor> stock)
     {
-        _debounceCts?.Cancel();
+        _activeCts?.Cancel();
 
         if (stock.Count == 0)
         {
-            _debounceCts = null;
+            _activeCts = null;
+            _activeSchedule = null;
             lock (_lock)
                 _snapshot = new SearchSnapshot(SearchStatus.NoStock, Array.Empty<CombinationResult>());
             return;
@@ -38,23 +40,54 @@ public sealed class SearchCoordinator
             _snapshot = _snapshot with { Status = SearchStatus.Searching };
 
         var cts = new CancellationTokenSource();
-        _debounceCts = cts;
-
-        _scheduler.Schedule(() => Dispatch(targetOhms, depth, stock), DebounceDelay, cts.Token);
+        _activeCts = cts;
+        _activeSchedule = _scheduler.Schedule(token => Dispatch(targetOhms, depth, stock, token), DebounceDelay, cts.Token);
     }
 
-    private async Task Dispatch(double targetOhms, int depth, IReadOnlyList<Resistor> stock)
+    public void Dispose()
     {
-        await _searchGate.WaitAsync().ConfigureAwait(false);
+        _activeCts?.Cancel();
+
+        if (_activeSchedule is { } schedule)
+        {
+            try
+            {
+                schedule.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        _searchGate.Dispose();
+    }
+
+    private async Task Dispatch(double targetOhms, int depth, IReadOnlyList<Resistor> stock, CancellationToken cancellationToken)
+    {
+        bool gateAcquired = false;
         try
         {
-            var results = await Task.Run(() => CombinationFinder.Find(stock, targetOhms, depth)).ConfigureAwait(false);
-            lock (_lock)
-                _snapshot = new SearchSnapshot(SearchStatus.Done, results);
+            await _searchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            gateAcquired = true;
+
+            var results = await Task.Run(
+                () => CombinationFinder.Find(stock, targetOhms, depth, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lock (_lock)
+                    _snapshot = new SearchSnapshot(SearchStatus.Done, results);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled search — discard silently, never publish.
         }
         finally
         {
-            _searchGate.Release();
+            if (gateAcquired)
+                _searchGate.Release();
         }
     }
 }

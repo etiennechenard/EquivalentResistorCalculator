@@ -5,20 +5,30 @@ namespace EquivalentResistorCalculator.Tests;
 
 public sealed class ManualDispatchScheduler : ISearchDispatchScheduler
 {
-    private Func<Task>? _pending;
+    private Func<CancellationToken, Task>? _pendingDispatch;
+    private CancellationToken _pendingToken;
+    private TaskCompletionSource? _pendingTcs;
     public int ScheduleCallCount { get; private set; }
 
-    public void Schedule(Func<Task> dispatch, TimeSpan delay, CancellationToken cancellationToken)
+    public Task Schedule(Func<CancellationToken, Task> dispatch, TimeSpan delay, CancellationToken cancellationToken)
     {
         ScheduleCallCount++;
-        _pending = dispatch;
+        _pendingDispatch = dispatch;
+        _pendingToken = cancellationToken;
+        _pendingTcs = new TaskCompletionSource();
+        return _pendingTcs.Task;
     }
 
-    public Task Fire()
+    public async Task Fire()
     {
-        var dispatch = _pending ?? throw new InvalidOperationException("No pending dispatch to fire.");
-        _pending = null;
-        return dispatch();
+        var dispatch = _pendingDispatch ?? throw new InvalidOperationException("No pending dispatch to fire.");
+        var token = _pendingToken;
+        var tcs = _pendingTcs!;
+        _pendingDispatch = null;
+        _pendingTcs = null;
+
+        await dispatch(token).ConfigureAwait(false);
+        tcs.SetResult();
     }
 }
 
@@ -85,5 +95,49 @@ public class SearchCoordinatorTests
         Assert.Equal(SearchStatus.Done, coordinator.Snapshot.Status);
         var topResult = coordinator.Snapshot.Results[0];
         Assert.Equal(220, topResult.TotalResistance);
+    }
+
+    [Fact]
+    public async Task Submit_NewerRequestCancelsInFlightOlderSearch_CancelledResultsNeverPublished_LatestRequestWins()
+    {
+        var scheduler = new ManualDispatchScheduler();
+        var coordinator = new SearchCoordinator(scheduler);
+
+        var bigStock = Enumerable.Range(1, 300)
+            .Select(i => new Resistor(i, $"R{i}", PackageType.ThroughHole))
+            .ToList();
+        var smallStock = new List<Resistor> { new(220, "220", PackageType.ThroughHole) };
+
+        coordinator.Submit(1_000, 3, bigStock);
+        var dispatch1 = scheduler.Fire();
+
+        coordinator.Submit(220, 1, smallStock);
+
+        await dispatch1;
+
+        var dispatch2 = scheduler.Fire();
+        await dispatch2;
+
+        Assert.Equal(SearchStatus.Done, coordinator.Snapshot.Status);
+        Assert.Single(coordinator.Snapshot.Results);
+        Assert.Equal(220, coordinator.Snapshot.Results[0].TotalResistance);
+    }
+
+    [Fact]
+    public void Dispose_CancelsInFlightSearchAndJoinsItBeforeReturning()
+    {
+        var scheduler = new ManualDispatchScheduler();
+        var coordinator = new SearchCoordinator(scheduler);
+
+        var bigStock = Enumerable.Range(1, 300)
+            .Select(i => new Resistor(i, $"R{i}", PackageType.ThroughHole))
+            .ToList();
+
+        coordinator.Submit(1_000, 3, bigStock);
+        _ = scheduler.Fire();
+
+        coordinator.Dispose();
+
+        Assert.Equal(SearchStatus.Searching, coordinator.Snapshot.Status);
     }
 }
