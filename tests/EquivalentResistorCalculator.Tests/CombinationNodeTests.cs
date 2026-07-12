@@ -1,4 +1,5 @@
 using EquivalentResistorCalculator.Core.Models;
+using EquivalentResistorCalculator.Core.Search;
 
 namespace EquivalentResistorCalculator.Tests;
 
@@ -50,5 +51,27 @@ public class CombinationNodeTests
         node = CombinationNode.Series(node, new Resistor(100, "100", PackageType.ThroughHole));
 
         Assert.Equal("((22K || 20K) + 100)", node.Description);
+    }
+
+    [Fact]
+    public void FinderBuiltTrees_DescriptionMatchesResultDescription()
+    {
+        var stock = new List<Resistor>
+        {
+            new(22_000, "22K", PackageType.ThroughHole),
+            new(20_000, "20K", PackageType.ThroughHole),
+            new(100, "100", PackageType.ThroughHole),
+        };
+
+        var results = CombinationFinder.Find(stock, targetOhms: 10_100, maxDepth: 3);
+
+        Assert.NotEmpty(results);
+        foreach (var result in results)
+        {
+            Assert.Equal(result.Description, result.Tree.Description);
+        }
+
+        var nested = results.Single(r => r.Description == "((22K || 20K) + 100)");
+        Assert.Equal("((22K || 20K) + 100)", nested.Tree.Description);
     }
 }
