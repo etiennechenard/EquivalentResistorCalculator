@@ -110,7 +110,7 @@ internal sealed class MainWindow : IDisposable
         if (_searchCoordinator.Snapshot.Status == SearchStatus.Searching)
         {
             ImGui.SameLine();
-            ImGui.TextUnformatted("Searching…");
+            ImGui.TextUnformatted("Searching...");
         }
     }
 

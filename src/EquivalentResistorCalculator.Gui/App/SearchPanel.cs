@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using Hexa.NET.ImGui;
 using EquivalentResistorCalculator.Core.Models;
@@ -10,6 +11,10 @@ namespace EquivalentResistorCalculator.Gui.App;
 
 internal sealed class SearchPanel
 {
+    private enum SortColumn { Rank, Result, ErrorPercent, Depth }
+
+    private const string ErrorPercentFormat = "+0.000;-0.000;0.000";
+
     private static readonly string[] PackageFilterLabels = { "All", "ThroughHole", "SMD" };
     private static readonly Vector4 ErrorColor = new(1f, 0.4f, 0.4f, 1f);
 
@@ -21,6 +26,8 @@ internal sealed class SearchPanel
     private string? _parseError;
     private int _depth;
     private int _packageFilterIndex;
+    private SortColumn _sortColumn = SortColumn.Rank;
+    private bool _sortAscending = true;
 
     public SearchPanel(SettingsService settingsService, StockRepository stockRepository, SearchCoordinator searchCoordinator)
     {
@@ -85,22 +92,116 @@ internal sealed class SearchPanel
         }
 
         ImGui.Separator();
-        RenderResultsPlaceholder();
+        RenderResultsArea();
     }
 
-    private void RenderResultsPlaceholder()
+    private void RenderResultsArea()
     {
         var snapshot = _searchCoordinator.Snapshot;
+
+        if (snapshot.Results.Count > 0)
+        {
+            RenderResultsTable(snapshot.Results);
+            return;
+        }
+
         string text = snapshot.Status switch
         {
             SearchStatus.NoStock => "No resistors in stock matching the current filter",
-            SearchStatus.Searching => "Searching…",
-            SearchStatus.Done when snapshot.Results.Count == 0 => "No combination found",
-            SearchStatus.Done => $"{snapshot.Results.Count} result(s) found (table rendering not yet implemented)",
+            SearchStatus.Searching => "Searching...",
+            SearchStatus.Done => "No combination found",
             _ => "Enter a target resistance to search",
         };
         ImGui.TextUnformatted(text);
     }
+
+    private void RenderResultsTable(IReadOnlyList<CombinationResult> results)
+    {
+        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.Resizable;
+        if (!ImGui.BeginTable("##results", 6, flags))
+            return;
+
+        ImGui.TableSetupColumn("#");
+        ImGui.TableSetupColumn("Combination");
+        ImGui.TableSetupColumn("Result");
+        ImGui.TableSetupColumn("Error %");
+        ImGui.TableSetupColumn("Depth");
+        ImGui.TableSetupColumn("");
+
+        ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+        ImGui.TableSetColumnIndex(0);
+        ImGui.TableHeader("#");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.TableHeader("Combination");
+        ImGui.TableSetColumnIndex(2);
+        RenderSortableHeader("Result", SortColumn.Result);
+        ImGui.TableSetColumnIndex(3);
+        RenderSortableHeader("Error %", SortColumn.ErrorPercent);
+        ImGui.TableSetColumnIndex(4);
+        RenderSortableHeader("Depth", SortColumn.Depth);
+        ImGui.TableSetColumnIndex(5);
+        ImGui.TableHeader("");
+
+        foreach (var (rank, result) in SortRows(results))
+        {
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text(rank.ToString(CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(result.Description);
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.TextUnformatted(ResistanceParser.Format(result.TotalResistance));
+
+            ImGui.TableSetColumnIndex(3);
+            ImGui.TextUnformatted(result.ErrorPercent.ToString(ErrorPercentFormat, CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(4);
+            ImGui.Text(result.Depth.ToString(CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(5);
+            if (ImGui.SmallButton($"Copy##{rank}"))
+                ImGui.SetClipboardText(BuildClipboardText(result));
+        }
+
+        ImGui.EndTable();
+    }
+
+    private void RenderSortableHeader(string label, SortColumn column)
+    {
+        bool isActive = _sortColumn == column;
+        string text = isActive ? label + (_sortAscending ? " ^" : " v") : label;
+        if (ImGui.Selectable(text, isActive))
+        {
+            if (isActive)
+                _sortAscending = !_sortAscending;
+            else
+            {
+                _sortColumn = column;
+                _sortAscending = true;
+            }
+        }
+    }
+
+    private IEnumerable<(int Rank, CombinationResult Result)> SortRows(IReadOnlyList<CombinationResult> results)
+    {
+        var ranked = results.Select((result, index) => (Rank: index + 1, Result: result));
+
+        IOrderedEnumerable<(int Rank, CombinationResult Result)> ordered = _sortColumn switch
+        {
+            SortColumn.Result => ranked.OrderBy(x => x.Result.TotalResistance),
+            SortColumn.ErrorPercent => ranked.OrderBy(x => Math.Abs(x.Result.ErrorPercent)),
+            SortColumn.Depth => ranked.OrderBy(x => x.Result.Depth),
+            _ => ranked.OrderBy(x => x.Rank),
+        };
+
+        return _sortAscending ? ordered : ordered.Reverse();
+    }
+
+    private static string BuildClipboardText(CombinationResult result)
+        => $"{result.Description} = {ResistanceParser.Format(result.TotalResistance)} ({result.ErrorPercent.ToString(ErrorPercentFormat, CultureInfo.InvariantCulture)}%)";
 
     private void OnTargetChanged()
     {
