@@ -13,7 +13,8 @@ internal sealed class SearchPanel
 {
     private enum SortColumn { Rank, Result, ErrorPercent, Depth }
 
-    private const string ErrorPercentFormat = "+0.000;-0.000;0.000";
+    internal const string ErrorPercentFormat = "+0.000;-0.000;0.000";
+    private const float MinSchematicHeight = 120f;
 
     private static readonly string[] PackageFilterLabels = { "All", "ThroughHole", "SMD" };
     private static readonly Vector4 ErrorColor = new(1f, 0.4f, 0.4f, 1f);
@@ -28,6 +29,9 @@ internal sealed class SearchPanel
     private int _packageFilterIndex;
     private SortColumn _sortColumn = SortColumn.Rank;
     private bool _sortAscending = true;
+    private IReadOnlyList<CombinationResult>? _lastSnapshotResults;
+    private CombinationResult? _selectedResult;
+    private readonly SchematicView _schematicView = new();
 
     public SearchPanel(SettingsService settingsService, StockRepository stockRepository, SearchCoordinator searchCoordinator)
     {
@@ -101,18 +105,34 @@ internal sealed class SearchPanel
 
         if (snapshot.Results.Count > 0)
         {
+            if (!ReferenceEquals(snapshot.Results, _lastSnapshotResults))
+            {
+                _lastSnapshotResults = snapshot.Results;
+                _selectedResult = snapshot.Results[0];
+            }
+
             RenderResultsTable(snapshot.Results);
-            return;
+        }
+        else
+        {
+            _lastSnapshotResults = null;
+            _selectedResult = null;
+
+            string text = snapshot.Status switch
+            {
+                SearchStatus.NoStock => "No resistors in stock matching the current filter",
+                SearchStatus.Searching => "Searching...",
+                SearchStatus.Done => "No combination found",
+                _ => "Enter a target resistance to search",
+            };
+            ImGui.TextUnformatted(text);
         }
 
-        string text = snapshot.Status switch
-        {
-            SearchStatus.NoStock => "No resistors in stock matching the current filter",
-            SearchStatus.Searching => "Searching...",
-            SearchStatus.Done => "No combination found",
-            _ => "Enter a target resistance to search",
-        };
-        ImGui.TextUnformatted(text);
+        ImGui.Separator();
+
+        float footerReserve = ImGui.GetFrameHeightWithSpacing() * 2f;
+        float schematicHeight = Math.Max(MinSchematicHeight, ImGui.GetContentRegionAvail().Y - footerReserve);
+        _schematicView.Render(_selectedResult, schematicHeight);
     }
 
     private void RenderResultsTable(IReadOnlyList<CombinationResult> results)
@@ -147,7 +167,10 @@ internal sealed class SearchPanel
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
-            ImGui.Text(rank.ToString(CultureInfo.InvariantCulture));
+            bool isSelected = ReferenceEquals(result, _selectedResult);
+            if (ImGui.Selectable(rank.ToString(CultureInfo.InvariantCulture), isSelected,
+                    ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
+                _selectedResult = result;
 
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted(result.Description);
@@ -200,7 +223,7 @@ internal sealed class SearchPanel
         return _sortAscending ? ordered : ordered.Reverse();
     }
 
-    private static string BuildClipboardText(CombinationResult result)
+    internal static string BuildClipboardText(CombinationResult result)
         => $"{result.Description} = {ResistanceParser.Format(result.TotalResistance)} ({result.ErrorPercent.ToString(ErrorPercentFormat, CultureInfo.InvariantCulture)}%)";
 
     private void OnTargetChanged()
@@ -208,24 +231,21 @@ internal sealed class SearchPanel
         if (string.IsNullOrWhiteSpace(_targetText))
         {
             _parseError = null;
+            Resubmit();
             return;
         }
 
-        if (ResistanceParser.TryParse(_targetText, out _))
-        {
-            _parseError = null;
-            Resubmit();
-        }
-        else
-        {
-            _parseError = "invalid";
-        }
+        _parseError = ResistanceParser.TryParse(_targetText, out _) ? null : "invalid";
+        Resubmit();
     }
 
     private void Resubmit()
     {
         if (!ResistanceParser.TryParse(_targetText, out double ohms))
+        {
+            _searchCoordinator.Clear();
             return;
+        }
 
         string fileName = _stockRepository.SelectedFileName ?? _stockRepository.Select(_settingsService.Current.StockFile);
         var loadResult = _stockRepository.Load(fileName);

@@ -45,6 +45,14 @@ public sealed class SearchCoordinator : IDisposable
         TrackOutstanding(schedule);
     }
 
+    public void Clear()
+    {
+        _activeCts?.Cancel();
+        _activeCts = null;
+        lock (_lock)
+            _snapshot = SearchSnapshot.Initial;
+    }
+
     public void Dispose()
     {
         _activeCts?.Cancel();
