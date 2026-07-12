@@ -134,6 +134,21 @@ public class StockRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Load_FolderEmptiedAfterSelection_ReseedsAndReturnsFallbackStock()
+    {
+        var repo = new StockRepository(_tempFolder);
+        repo.EnumerateStockFiles();
+        File.Delete(Path.Combine(_tempFolder, "default.csv"));
+
+        var result = repo.Load("default.csv");
+
+        Assert.Equal("default.csv", result.FileName);
+        Assert.Equal("default.csv", repo.SelectedFileName);
+        Assert.Equal(60, result.Resistors.Count);
+        Assert.Equal(61, File.ReadAllLines(Path.Combine(_tempFolder, "default.csv")).Length);
+    }
+
+    [Fact]
     public void Load_ParsesValidRows()
     {
         Directory.CreateDirectory(_tempFolder);

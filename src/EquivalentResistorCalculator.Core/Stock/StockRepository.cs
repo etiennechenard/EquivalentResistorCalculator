@@ -91,6 +91,21 @@ public sealed class StockRepository
 
     public StockLoadResult Load(string fileName)
     {
+        SeedIfEmpty();
+
+        var existingNames = Directory.EnumerateFiles(_stocksFolder, "*.csv", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (!existingNames.Any(name => string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            fileName = existingNames[0];
+        }
+
+        SelectedFileName = fileName;
         string path = Path.Combine(_stocksFolder, fileName);
         var resistors = new List<Resistor>();
         int skipped = 0;
