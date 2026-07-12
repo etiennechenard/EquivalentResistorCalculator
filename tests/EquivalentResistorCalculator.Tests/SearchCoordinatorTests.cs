@@ -15,8 +15,24 @@ public sealed class ManualDispatchScheduler : ISearchDispatchScheduler
         ScheduleCallCount++;
         _pendingDispatch = dispatch;
         _pendingToken = cancellationToken;
-        _pendingTcs = new TaskCompletionSource();
-        return _pendingTcs.Task;
+        var tcs = new TaskCompletionSource();
+        _pendingTcs = tcs;
+
+        // Mirrors the production scheduler: cancelling a request that hasn't been
+        // Fire()d yet (still "debouncing") completes its task immediately, same as
+        // a cancelled Task.Delay would. A request already Fire()d is unaffected —
+        // its task only completes once the real dispatch finishes.
+        cancellationToken.Register(() =>
+        {
+            if (ReferenceEquals(_pendingTcs, tcs))
+            {
+                _pendingDispatch = null;
+                _pendingTcs = null;
+                tcs.TrySetResult();
+            }
+        });
+
+        return tcs.Task;
     }
 
     public async Task Fire()
@@ -28,7 +44,7 @@ public sealed class ManualDispatchScheduler : ISearchDispatchScheduler
         _pendingTcs = null;
 
         await dispatch(token).ConfigureAwait(false);
-        tcs.SetResult();
+        tcs.TrySetResult();
     }
 }
 
@@ -139,5 +155,31 @@ public class SearchCoordinatorTests
         coordinator.Dispose();
 
         Assert.Equal(SearchStatus.Searching, coordinator.Snapshot.Status);
+    }
+
+    [Fact]
+    public void Dispose_JoinsSupersededInFlightSearchBeforeDisposingGate_NoObjectDisposedException()
+    {
+        var scheduler = new ManualDispatchScheduler();
+        var coordinator = new SearchCoordinator(scheduler);
+
+        var bigStock = Enumerable.Range(1, 300)
+            .Select(i => new Resistor(i, $"R{i}", PackageType.ThroughHole))
+            .ToList();
+        var smallStock = new List<Resistor> { new(220, "220", PackageType.ThroughHole) };
+
+        coordinator.Submit(1_000, 3, bigStock);
+        var dispatchA = scheduler.Fire(); // A is now running Find on the thread pool, holding the gate.
+
+        coordinator.Submit(220, 1, smallStock); // Supersedes A; A is still winding down. B is never Fire()d.
+
+        // Dispose must cancel and join BOTH A (superseded, in flight) and B (never
+        // dispatched) before disposing the gate. If it only joined the latest
+        // tracked request (B) and disposed the gate immediately, A's still-running
+        // finally block would call Release() on an already-disposed semaphore.
+        coordinator.Dispose();
+
+        var exception = Record.Exception(() => dispatchA.GetAwaiter().GetResult());
+        Assert.Null(exception);
     }
 }

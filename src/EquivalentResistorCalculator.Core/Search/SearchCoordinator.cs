@@ -9,9 +9,9 @@ public sealed class SearchCoordinator : IDisposable
     private readonly object _lock = new();
     private readonly SemaphoreSlim _searchGate = new(1, 1);
     private readonly ISearchDispatchScheduler _scheduler;
+    private readonly List<Task> _outstandingDispatches = new();
     private SearchSnapshot _snapshot = SearchSnapshot.Initial;
     private CancellationTokenSource? _activeCts;
-    private Task? _activeSchedule;
 
     public SearchCoordinator(ISearchDispatchScheduler? scheduler = null)
     {
@@ -30,7 +30,6 @@ public sealed class SearchCoordinator : IDisposable
         if (stock.Count == 0)
         {
             _activeCts = null;
-            _activeSchedule = null;
             lock (_lock)
                 _snapshot = new SearchSnapshot(SearchStatus.NoStock, Array.Empty<CombinationResult>());
             return;
@@ -41,18 +40,24 @@ public sealed class SearchCoordinator : IDisposable
 
         var cts = new CancellationTokenSource();
         _activeCts = cts;
-        _activeSchedule = _scheduler.Schedule(token => Dispatch(targetOhms, depth, stock, token), DebounceDelay, cts.Token);
+
+        var schedule = _scheduler.Schedule(token => Dispatch(targetOhms, depth, stock, token), DebounceDelay, cts.Token);
+        TrackOutstanding(schedule);
     }
 
     public void Dispose()
     {
         _activeCts?.Cancel();
 
-        if (_activeSchedule is { } schedule)
+        Task[] outstanding;
+        lock (_lock)
+            outstanding = _outstandingDispatches.ToArray();
+
+        foreach (var task in outstanding)
         {
             try
             {
-                schedule.GetAwaiter().GetResult();
+                task.GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -60,6 +65,15 @@ public sealed class SearchCoordinator : IDisposable
         }
 
         _searchGate.Dispose();
+    }
+
+    private void TrackOutstanding(Task task)
+    {
+        lock (_lock)
+        {
+            _outstandingDispatches.RemoveAll(t => t.IsCompleted);
+            _outstandingDispatches.Add(task);
+        }
     }
 
     private async Task Dispatch(double targetOhms, int depth, IReadOnlyList<Resistor> stock, CancellationToken cancellationToken)
