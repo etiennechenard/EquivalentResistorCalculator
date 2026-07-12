@@ -22,6 +22,7 @@ internal sealed class SearchPanel
     private readonly SettingsService _settingsService;
     private readonly StockRepository _stockRepository;
     private readonly SearchCoordinator _searchCoordinator;
+    private readonly Action _onFilterChanged;
 
     private string _targetText = string.Empty;
     private string? _parseError;
@@ -33,11 +34,12 @@ internal sealed class SearchPanel
     private CombinationResult? _selectedResult;
     private readonly SchematicView _schematicView = new();
 
-    public SearchPanel(SettingsService settingsService, StockRepository stockRepository, SearchCoordinator searchCoordinator)
+    public SearchPanel(SettingsService settingsService, StockRepository stockRepository, SearchCoordinator searchCoordinator, Action onFilterChanged)
     {
         _settingsService = settingsService;
         _stockRepository = stockRepository;
         _searchCoordinator = searchCoordinator;
+        _onFilterChanged = onFilterChanged;
 
         _depth = _settingsService.Current.MaxDepth;
         _packageFilterIndex = _settingsService.Current.PackageFilter switch
@@ -104,6 +106,7 @@ internal sealed class SearchPanel
                 _ => null,
             };
             _settingsService.Save();
+            _onFilterChanged();
             Resubmit();
         }
 

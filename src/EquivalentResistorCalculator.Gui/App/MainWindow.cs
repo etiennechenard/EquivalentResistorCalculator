@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using Hexa.NET.ImGui;
+using EquivalentResistorCalculator.Core.Models;
 using EquivalentResistorCalculator.Core.Search;
 using EquivalentResistorCalculator.Core.Stock;
 using EquivalentResistorCalculator.Gui.Settings;
@@ -19,6 +20,8 @@ internal sealed class MainWindow : IDisposable
     private readonly Stopwatch _pollStopwatch = Stopwatch.StartNew();
 
     private IReadOnlyList<string> _stockFiles = Array.Empty<string>();
+    private IReadOnlyList<Resistor> _loadedResistors = Array.Empty<Resistor>();
+    private int _loadedSkippedRowCount;
     private string _selectedFileName = string.Empty;
     private string _stockSummary = string.Empty;
 
@@ -41,7 +44,7 @@ internal sealed class MainWindow : IDisposable
         LoadStockFile(_settingsService.Current.StockFile);
 
         _searchCoordinator = new SearchCoordinator();
-        _searchPanel = new SearchPanel(_settingsService, _stockRepository, _searchCoordinator);
+        _searchPanel = new SearchPanel(_settingsService, _stockRepository, _searchCoordinator, RefreshStockSummary);
     }
 
     public void Render()
@@ -229,13 +232,19 @@ internal sealed class MainWindow : IDisposable
 
         _stockFiles = _stockRepository.EnumerateStockFiles();
         _selectedFileName = result.FileName;
-
-        int matchingCount = StockRepository.FilterByPackage(result.Resistors, _settingsService.Current.PackageFilter).Count;
-        _stockSummary = result.SkippedRowCount > 0
-            ? $"{result.FileName}: {matchingCount} rows ({result.SkippedRowCount} skipped)"
-            : $"{result.FileName}: {matchingCount} rows";
+        _loadedResistors = result.Resistors;
+        _loadedSkippedRowCount = result.SkippedRowCount;
+        RefreshStockSummary();
 
         _settingsService.Current.StockFile = _selectedFileName;
         _settingsService.Save();
+    }
+
+    private void RefreshStockSummary()
+    {
+        int matchingCount = StockRepository.FilterByPackage(_loadedResistors, _settingsService.Current.PackageFilter).Count;
+        _stockSummary = _loadedSkippedRowCount > 0
+            ? $"{_selectedFileName}: {matchingCount} rows ({_loadedSkippedRowCount} skipped)"
+            : $"{_selectedFileName}: {matchingCount} rows";
     }
 }
