@@ -1,10 +1,32 @@
 using Hexa.NET.ImGui;
+using EquivalentResistorCalculator.Core.Stock;
+using EquivalentResistorCalculator.Gui.Settings;
 
 namespace EquivalentResistorCalculator.Gui.App;
 
 internal sealed class MainWindow : IDisposable
 {
+    private readonly SettingsService _settingsService;
+    private readonly StockRepository _stockRepository;
+
+    private IReadOnlyList<string> _stockFiles = Array.Empty<string>();
+    private string _selectedFileName = string.Empty;
+    private string _stockSummary = string.Empty;
+
     public bool ShouldClose { get; private set; }
+
+    public MainWindow()
+    {
+        _settingsService = new SettingsService();
+
+        var stocksFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "EquivalentResistorCalculator",
+            "stocks");
+        _stockRepository = new StockRepository(stocksFolder);
+
+        LoadStockFile(_settingsService.Current.StockFile);
+    }
 
     public void Render()
     {
@@ -22,10 +44,54 @@ internal sealed class MainWindow : IDisposable
         ImGui.Begin("##main", noDecor);
         ImGui.PopStyleVar(2);
 
+        RenderStockBar();
+
         ImGui.End();
     }
 
     public void Dispose()
     {
+    }
+
+    private void RenderStockBar()
+    {
+        ImGui.Text("Stock:");
+        ImGui.SameLine();
+
+        ImGui.SetNextItemWidth(200f);
+        if (ImGui.BeginCombo("##stockfile", _selectedFileName))
+        {
+            foreach (var file in _stockFiles)
+            {
+                bool isSelected = string.Equals(file, _selectedFileName, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(file, isSelected) && !isSelected)
+                    LoadStockFile(file);
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextUnformatted(_stockSummary);
+    }
+
+    private void LoadStockFile(string? requestedFileName)
+    {
+        string selected = _stockRepository.Select(requestedFileName);
+        var result = _stockRepository.Load(selected);
+
+        _stockFiles = _stockRepository.EnumerateStockFiles();
+        _selectedFileName = result.FileName;
+
+        int matchingCount = StockRepository.FilterByPackage(result.Resistors, _settingsService.Current.PackageFilter).Count;
+        _stockSummary = result.SkippedRowCount > 0
+            ? $"{result.FileName}: {matchingCount} rows ({result.SkippedRowCount} skipped)"
+            : $"{result.FileName}: {matchingCount} rows";
+
+        _settingsService.Current.StockFile = _selectedFileName;
+        _settingsService.Save();
     }
 }
