@@ -221,4 +221,49 @@ public class StockRepositoryTests : IDisposable
         Assert.All(filtered, r => Assert.Equal(filter, r.Package));
         Assert.Single(filtered);
     }
+
+    [Fact]
+    public void HasSelectedFileContentChanged_FalseAfterLoad_TrueAfterTimestampChange_FalseAfterReload()
+    {
+        Directory.CreateDirectory(_tempFolder);
+        string path = Path.Combine(_tempFolder, "bench.csv");
+        File.WriteAllLines(path, new[] { "Value,Label,Package", "10,10,ThroughHole" });
+
+        var repo = new StockRepository(_tempFolder);
+        repo.Load("bench.csv");
+
+        Assert.False(repo.HasSelectedFileContentChanged());
+
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+
+        Assert.True(repo.HasSelectedFileContentChanged());
+
+        repo.Load("bench.csv");
+
+        Assert.False(repo.HasSelectedFileContentChanged());
+    }
+
+    [Fact]
+    public void HasFolderListingChanged_DetectsAdditionAndRemoval()
+    {
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllLines(Path.Combine(_tempFolder, "bench.csv"), new[] { "Value,Label,Package", "10,10,ThroughHole" });
+
+        var repo = new StockRepository(_tempFolder);
+        repo.EnumerateStockFiles();
+
+        Assert.False(repo.HasFolderListingChanged());
+
+        File.WriteAllLines(Path.Combine(_tempFolder, "extra.csv"), new[] { "Value,Label,Package", "20,20,ThroughHole" });
+
+        Assert.True(repo.HasFolderListingChanged());
+
+        repo.EnumerateStockFiles();
+
+        Assert.False(repo.HasFolderListingChanged());
+
+        File.Delete(Path.Combine(_tempFolder, "extra.csv"));
+
+        Assert.True(repo.HasFolderListingChanged());
+    }
 }

@@ -46,6 +46,9 @@ public sealed class StockRepository
     };
 
     private readonly string _stocksFolder;
+    private HashSet<string> _lastKnownFileNames = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lastLoadedFileName;
+    private DateTime? _lastLoadedWriteTimeUtc;
 
     public StockRepository(string stocksFolder)
     {
@@ -61,12 +64,16 @@ public sealed class StockRepository
     {
         SeedIfEmpty();
 
-        return Directory.EnumerateFiles(_stocksFolder, "*.csv", SearchOption.TopDirectoryOnly)
+        var names = Directory.EnumerateFiles(_stocksFolder, "*.csv", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileName)
             .Where(name => name is not null)
             .Select(name => name!)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        _lastKnownFileNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+
+        return names;
     }
 
     public string Select(string? requestedFileName)
@@ -117,6 +124,9 @@ public sealed class StockRepository
             resistors.Add(new Resistor(value, label, package));
         }
 
+        _lastLoadedFileName = fileName;
+        _lastLoadedWriteTimeUtc = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : (DateTime?)null;
+
         return new StockLoadResult(fileName, resistors, skipped);
     }
 
@@ -124,6 +134,27 @@ public sealed class StockRepository
         => packageFilter is null
             ? resistors
             : resistors.Where(r => r.Package == packageFilter.Value).ToList();
+
+    public bool HasSelectedFileContentChanged()
+    {
+        if (_lastLoadedFileName is null)
+            return false;
+
+        string path = Path.Combine(_stocksFolder, _lastLoadedFileName);
+        DateTime? currentWriteTime = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : (DateTime?)null;
+        return currentWriteTime != _lastLoadedWriteTimeUtc;
+    }
+
+    public bool HasFolderListingChanged()
+    {
+        var currentNames = Directory.EnumerateFiles(_stocksFolder, "*.csv", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return !currentNames.SetEquals(_lastKnownFileNames);
+    }
 
     private void SeedIfEmpty()
     {
