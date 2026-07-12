@@ -37,6 +37,8 @@ internal sealed class SearchPanel
         };
     }
 
+    public void ResubmitCurrentSearch() => Resubmit();
+
     public void Render()
     {
         ImGui.Text("Target:");

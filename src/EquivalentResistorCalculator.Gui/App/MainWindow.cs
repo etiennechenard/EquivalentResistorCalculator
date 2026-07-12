@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Hexa.NET.ImGui;
 using EquivalentResistorCalculator.Core.Search;
 using EquivalentResistorCalculator.Core.Stock;
@@ -7,10 +8,13 @@ namespace EquivalentResistorCalculator.Gui.App;
 
 internal sealed class MainWindow : IDisposable
 {
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
     private readonly SettingsService _settingsService;
     private readonly StockRepository _stockRepository;
     private readonly SearchCoordinator _searchCoordinator;
     private readonly SearchPanel _searchPanel;
+    private readonly Stopwatch _pollStopwatch = Stopwatch.StartNew();
 
     private IReadOnlyList<string> _stockFiles = Array.Empty<string>();
     private string _selectedFileName = string.Empty;
@@ -50,6 +54,12 @@ internal sealed class MainWindow : IDisposable
         ImGui.Begin("##main", noDecor);
         ImGui.PopStyleVar(2);
 
+        if (_pollStopwatch.Elapsed >= PollInterval)
+        {
+            _pollStopwatch.Restart();
+            PollStockChanges();
+        }
+
         _searchPanel.Render();
         ImGui.Separator();
         RenderStockBar();
@@ -74,7 +84,10 @@ internal sealed class MainWindow : IDisposable
             {
                 bool isSelected = string.Equals(file, _selectedFileName, StringComparison.OrdinalIgnoreCase);
                 if (ImGui.Selectable(file, isSelected) && !isSelected)
+                {
                     LoadStockFile(file);
+                    _searchPanel.ResubmitCurrentSearch();
+                }
 
                 if (isSelected)
                     ImGui.SetItemDefaultFocus();
@@ -86,10 +99,46 @@ internal sealed class MainWindow : IDisposable
         ImGui.SameLine();
         ImGui.TextUnformatted(_stockSummary);
 
+        ImGui.SameLine();
+        if (ImGui.Button("Edit stock file"))
+            ShellExecute(Path.Combine(_stockRepository.StocksFolder, _selectedFileName));
+
+        ImGui.SameLine();
+        if (ImGui.Button("Open stocks folder"))
+            ShellExecute(_stockRepository.StocksFolder);
+
         if (_searchCoordinator.Snapshot.Status == SearchStatus.Searching)
         {
             ImGui.SameLine();
             ImGui.TextUnformatted("Searching…");
+        }
+    }
+
+    private static void ShellExecute(string path)
+        => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
+
+    private void PollStockChanges()
+    {
+        if (_stockRepository.HasSelectedFileContentChanged())
+        {
+            LoadStockFile(_selectedFileName);
+            _searchPanel.ResubmitCurrentSearch();
+            return;
+        }
+
+        if (_stockRepository.HasFolderListingChanged())
+        {
+            var names = _stockRepository.EnumerateStockFiles();
+            bool selectedStillExists = names.Any(f => string.Equals(f, _selectedFileName, StringComparison.OrdinalIgnoreCase));
+            if (selectedStillExists)
+            {
+                _stockFiles = names;
+            }
+            else
+            {
+                LoadStockFile(_selectedFileName);
+                _searchPanel.ResubmitCurrentSearch();
+            }
         }
     }
 
